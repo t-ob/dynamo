@@ -5,7 +5,7 @@ set -e
 # Get the absolute path to the directory containing this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-pushd "$SCRIPT_DIR/../dynamo"
+pushd "$SCRIPT_DIR/.."
 
 CARGO_TARGET_DIR=$HOME/dynamo/.build/target cargo build -p file://$(pwd)/components/http
 CARGO_TARGET_DIR=$HOME/dynamo/.build/target cargo build -p llmctl
