@@ -20,6 +20,7 @@ if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
 fi
 
 set -e
+set -x
 
 TAG=
 RUN_PREFIX=

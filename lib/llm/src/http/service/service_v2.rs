@@ -46,6 +46,9 @@ pub struct HttpServiceConfig {
     #[builder(default = "true")]
     enable_cmpl_endpoints: bool,
 
+    #[builder(default = "true")]
+    enable_embeddings_endpoints: bool,
+
     #[builder(default = "None")]
     request_template: Option<RequestTemplate>,
 }
@@ -86,7 +89,7 @@ impl HttpService {
 
 impl HttpServiceConfigBuilder {
     pub fn build(self) -> Result<HttpService, anyhow::Error> {
-        let config = self.build_internal()?;
+        let config: HttpServiceConfig = self.build_internal()?;
 
         let model_manager = ModelManager::new();
 
@@ -113,6 +116,13 @@ impl HttpServiceConfigBuilder {
 
         if config.enable_cmpl_endpoints {
             routes.push(super::openai::completions_router(
+                model_manager.state(),
+                None,
+            ));
+        }
+
+        if config.enable_embeddings_endpoints {
+            routes.push(super::openai::embeddings_router(
                 model_manager.state(),
                 None,
             ));

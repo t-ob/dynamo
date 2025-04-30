@@ -43,6 +43,7 @@ use super::{
 use crate::protocols::openai::{
     chat_completions::NvCreateChatCompletionResponse, completions::CompletionResponse,
 };
+use crate::protocols::openai::embeddings::{NvCreateEmbeddingRequest, NvCreateEmbeddingResponse};
 use crate::request_template::RequestTemplate;
 use crate::types::{
     openai::{chat_completions::NvCreateChatCompletionRequest, completions::CompletionRequest},
@@ -208,6 +209,80 @@ async fn completions(
         inflight.mark_ok();
         Ok(Json(response).into_response())
     }
+}
+
+#[tracing::instrument(skip_all)]
+async fn embeddings(
+    State(state): State<Arc<DeploymentState>>,
+    Json(request): Json<NvCreateEmbeddingRequest>,
+) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+    check_ready(&state)?;
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+
+    let inner_request = request.inner;
+
+    let request = NvCreateEmbeddingRequest {
+        inner: inner_request,
+        nvext: request.nvext,
+    };
+
+    let model = &request.inner.model;
+
+    tracing::trace!("Getting embeddings engine for model: {}", model);
+    let engine = state
+        .get_embeddings_engine(model)
+        .map_err(|_| ErrorResponse::model_not_found())?;
+
+    // this will increment the inflight gauge for the model
+    let mut inflight = state.create_inflight_guard(model, Endpoint::Embeddings, false);
+
+    // setup context
+    // todo - inherit request_id from distributed trace details
+    let request = Context::with_id(request, request_id.clone());
+
+    tracing::trace!("Issuing generate call for embeddings");
+
+    // issue the generate call on the engine
+    let stream = engine
+        .generate(request)
+        .await
+        .map_err(|e| ErrorResponse::from_anyhow(e, "Failed to generate embeddings"))?;
+
+    // capture the context to cancel the stream if the client disconnects
+    let ctx = stream.context();
+
+    // todo - tap the stream and propagate request level metrics
+    // note - we might do this as part of the post processing set to make it more generic
+    let response = NvCreateEmbeddingResponse {
+        inner: async_openai::types::CreateEmbeddingResponse {
+            object: "list".to_string(),
+            data: vec![],
+            model: "".to_string(),
+            usage: async_openai::types::EmbeddingUsage {
+                prompt_tokens: 0,
+                total_tokens: 0,
+            },
+        },
+    };
+
+    // let response = NvCreateEmbeddingResponse::from_annotated_stream(stream.into())
+    //     .await
+    //     .map_err(|e| {
+    //         tracing::error!(
+    //             request_id,
+    //             "Failed to fold embeddings stream for: {:?}",
+    //             e
+    //         );
+    //         ErrorResponse::internal_server_error(&format!(
+    //             "Failed to fold embeddings stream: {}",
+    //             e
+    //         ))
+    //     })?;
+
+    inflight.mark_ok();
+    Ok(Json(response).into_response())
+
 }
 
 /// OpenAI Chat Completions Request Handler
@@ -391,6 +466,7 @@ async fn list_models_openai(
         .engines
         .keys()
         .chain(state.completion_engines.lock().unwrap().engines.keys())
+        .chain(state.embeddings_engines.lock().unwrap().engines.keys())
         .cloned()
         .collect();
 
@@ -537,6 +613,21 @@ pub fn chat_completions_router(
         .with_state((state, template));
     (vec![doc], router)
 }
+
+/// Create an Axum [`Router`] for the OpenAI API Embeddings endpoint
+/// If not path is provided, the default path is `/v1/embeddings`
+pub fn embeddings_router(
+    state: Arc<DeploymentState>,
+    path: Option<String>,
+) -> (Vec<RouteDoc>, Router) {
+    let path = path.unwrap_or("/v1/embeddings".to_string());
+    let doc = RouteDoc::new(axum::http::Method::POST, &path);
+    let router = Router::new()
+        .route(&path, post(embeddings))
+        .with_state(state);
+    (vec![doc], router)
+}
+
 
 /// List Models
 pub fn list_models_router(

@@ -46,6 +46,7 @@ use crate::{
     key_value_store::{EtcdStorage, KeyValueStore, KeyValueStoreManager},
     model_card::{self, ModelDeploymentCard},
 };
+use crate::protocols::openai::embeddings::{NvCreateEmbeddingRequest, NvCreateEmbeddingResponse};
 use tracing;
 
 /// [ModelEntry] is a struct that contains the information for the HTTP service to discover models
@@ -218,6 +219,7 @@ async fn handle_delete(kv: &KeyValue, state: Arc<ModelWatchState>) -> anyhow::Re
     // Ignore the errors because model could be either type
     let _ = state.manager.remove_chat_completions_model(model_name);
     let _ = state.manager.remove_completions_model(model_name);
+    let _ = state.manager.remove_embeddings_model(model_name);
 
     Ok(model_name)
 }
@@ -333,6 +335,18 @@ async fn handle_put(model_entry: &ModelEntry, state: Arc<ModelWatchState>) -> an
             state
                 .manager
                 .add_completions_model(&model_entry.name, engine)?;
+        }
+        ModelType::Embedding => {
+            let client = state
+                .drt
+                .namespace(model_entry.endpoint.namespace)?
+                .component(model_entry.endpoint.component)?
+                .endpoint(model_entry.endpoint.name)
+                .client::<NvCreateEmbeddingRequest, Annotated<NvCreateEmbeddingResponse>>()
+                .await?;
+            state
+                .manager
+                .add_embeddings_model(&model_entry.name, Arc::new(client))?;
         }
     }
 
