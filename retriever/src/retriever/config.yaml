@@ -1,0 +1,29 @@
+Common: &common
+  model: intfloat/e5-large-v2
+  served_model_name: intfloat/e5-large-v2
+  block-size: 64
+  max-model-len: 16384
+
+Frontend:
+  <<: *common
+  endpoint: dynamo.Processor.embed
+  port: 8000
+  common-configs: [model]
+
+Processor:
+  <<: *common
+
+TrtWorker:
+  <<: *common
+
+# VllmWorker:
+#   enforce-eager: true
+#   max-num-batched-tokens: 16384
+#   enable-prefix-caching: true
+#   router: random
+#   tensor-parallel-size: 1
+#   ServiceArgs:
+#     workers: 1
+#     resources:
+#       gpu: 1
+#   common-configs: [model, block-size, max-model-len]

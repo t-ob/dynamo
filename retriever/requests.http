@@ -1,0 +1,12 @@
+curl http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "nvidia/nv-embedqa-llama32-1b-v2",
+    "input": "Hello, world!"
+  }'
+
+
+###
+
+
+curl http://localhost:8000/v1/models
