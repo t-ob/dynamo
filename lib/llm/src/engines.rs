@@ -22,6 +22,7 @@ use async_stream::stream;
 use async_trait::async_trait;
 
 use dynamo_runtime::engine::{AsyncEngine, AsyncEngineContextProvider, ResponseStream};
+use dynamo_runtime::pipeline::SingleOut;
 use dynamo_runtime::pipeline::{Error, ManyOut, SingleIn};
 use dynamo_runtime::protocols::annotated::Annotated;
 
@@ -32,6 +33,8 @@ use crate::protocols::openai::{
     chat_completions::{NvCreateChatCompletionRequest, NvCreateChatCompletionStreamResponse},
     completions::{prompt_to_string, CompletionRequest, CompletionResponse},
 };
+use crate::types::openai::embeddings::NvCreateEmbeddingRequest;
+use crate::types::openai::embeddings::NvCreateEmbeddingResponse;
 
 //
 // The engines are each in their own crate under `lib/engines`
@@ -145,6 +148,11 @@ pub trait StreamingEngine: Send + Sync {
         &self,
         req: SingleIn<NvCreateChatCompletionRequest>,
     ) -> Result<ManyOut<Annotated<NvCreateChatCompletionStreamResponse>>, Error>;
+
+    async fn handle_embedding(
+        &self,
+        req: SingleIn<NvCreateEmbeddingRequest>,
+    ) -> Result<ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error>;
 }
 
 pub fn make_engine_full() -> Arc<dyn StreamingEngine> {
@@ -241,7 +249,7 @@ where
             SingleIn<NvCreateChatCompletionRequest>,
             ManyOut<Annotated<NvCreateChatCompletionStreamResponse>>,
             Error,
-        > + Send
+        > + AsyncEngine<SingleIn<NvCreateEmbeddingRequest>, ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error> + Send
         + Sync,
 {
     async fn handle_completion(
@@ -257,8 +265,14 @@ where
     ) -> Result<ManyOut<Annotated<NvCreateChatCompletionStreamResponse>>, Error> {
         self.inner.generate(req).await
     }
-}
 
+    async fn handle_embedding(
+        &self,
+        req: SingleIn<NvCreateEmbeddingRequest>,
+    ) -> Result<ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error> {
+        self.inner.generate(req).await
+    }
+}
 pub struct StreamingEngineAdapter(Arc<dyn StreamingEngine>);
 
 impl StreamingEngineAdapter {
@@ -292,5 +306,16 @@ impl
         req: SingleIn<NvCreateChatCompletionRequest>,
     ) -> Result<ManyOut<Annotated<NvCreateChatCompletionStreamResponse>>, Error> {
         self.0.handle_chat(req).await
+    }
+}
+
+
+#[async_trait]
+impl AsyncEngine<SingleIn<NvCreateEmbeddingRequest>, ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error> for StreamingEngineAdapter {
+    async fn generate(
+        &self,
+        req: SingleIn<NvCreateEmbeddingRequest>,
+    ) -> Result<ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error> {
+        self.0.handle_embedding(req).await
     }
 }

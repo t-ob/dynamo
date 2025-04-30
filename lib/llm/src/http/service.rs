@@ -119,7 +119,7 @@ impl ModelManager {
     pub fn add_embeddings_model(
         &self,
         model: &str,
-        engine: OpenAIEmbeddingsUnaryEngine,
+        engine: OpenAIEmbeddingsStreamingEngine,
     ) -> Result<(), ServiceHttpError> {
         let mut clients = self.state.embeddings_engines.lock().unwrap();
         clients.add(model, engine)
@@ -205,7 +205,7 @@ impl<E> ModelEngines<E> {
 pub struct DeploymentState {
     completion_engines: Arc<Mutex<ModelEngines<OpenAICompletionsStreamingEngine>>>,
     chat_completion_engines: Arc<Mutex<ModelEngines<OpenAIChatCompletionsStreamingEngine>>>,
-    embeddings_engines: Arc<Mutex<ModelEngines<OpenAIEmbeddingsUnaryEngine>>>,
+    embeddings_engines: Arc<Mutex<ModelEngines<OpenAIEmbeddingsStreamingEngine>>>,
     metrics: Arc<Metrics>,
     sse_keep_alive: Option<Duration>,
 }
@@ -224,7 +224,7 @@ impl DeploymentState {
     fn get_embeddings_engine(
         &self,
         model: &str,
-    ) -> Result<OpenAIEmbeddingsUnaryEngine, ServiceHttpError> {
+    ) -> Result<OpenAIEmbeddingsStreamingEngine, ServiceHttpError> {
         self.embeddings_engines
             .lock()
             .unwrap()
