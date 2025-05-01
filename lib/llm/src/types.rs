@@ -63,6 +63,6 @@ pub mod openai {
 
         /// A [`ServerStreamingEngine`] implementation for the OpenAI Embeddings API
         pub type OpenAIEmbeddingsStreamingEngine =
-            ServerStreamingEngine<NvCreateEmbeddingRequest, NvCreateEmbeddingResponse>;
+            ServerStreamingEngine<NvCreateEmbeddingRequest, Annotated<NvCreateEmbeddingResponse>>;
     }
 }

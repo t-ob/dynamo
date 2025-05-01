@@ -47,6 +47,22 @@ pub struct NvCreateEmbeddingResponse {
     pub inner: async_openai::types::CreateEmbeddingResponse,
 }
 
+impl NvCreateEmbeddingResponse {
+    pub fn empty() -> Self {
+        Self {
+            inner: async_openai::types::CreateEmbeddingResponse {
+                object: "embedding".to_string(),
+                model: "embedding".to_string(),
+                data: vec![],
+                usage: async_openai::types::EmbeddingUsage {
+                    prompt_tokens: 0,
+                    total_tokens: 0,
+                },
+            },
+        }
+    }
+}
+
 /// Implements `NvExtProvider` for `NvCr    eateEmbeddingRequest`,
 /// providing access to NVIDIA-specific extensions.
 impl NvExtProvider for NvCreateEmbeddingRequest {
