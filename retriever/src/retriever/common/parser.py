@@ -119,9 +119,9 @@ def parse_tensorrt_llm_args(
     config_args,
 ) -> Tuple[Any, Tuple[Dict[str, Any], Dict[str, Any]]]:
     parser = argparse.ArgumentParser(description="A TensorRT-LLM Worker parser")
-    parser.add_argument(
-        "--engine_args", type=str, required=True, help="Path to the engine args file"
-    )
+    # parser.add_argument(
+    #     "--engine_args", type=str, required=True, help="Path to the engine args file"
+    # )
     parser.add_argument(
         "--llmapi-disaggregated-config",
         "-c",

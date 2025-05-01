@@ -13,9 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, field_validator
 
 # from tensorrt_llm.llmapi import DisaggregatedParams as LlmDisaggregatedParams
 # from tensorrt_llm.serve.openai_protocol import (
@@ -28,8 +27,26 @@ from pydantic import BaseModel, Field
 # )
 
 
+# class DynamoEmbeddingRequest(BaseModel):
+#     id: str = Field(default_factory=lambda: f"emb-{str(uuid.uuid4().hex)}")
+
+
 class DynamoEmbeddingRequest(BaseModel):
-    id: str = Field(default_factory=lambda: f"emb-{str(uuid.uuid4().hex)}")
+    model: str
+    input: list[str]
+
+    @field_validator("input", mode="before")
+    @classmethod
+    def validate_input(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+
+
+class TrtWorkerEmbeddingRequest(BaseModel):
+    input_ids: list[list[int]]
+    attention_mask: list[list[int]]
+    token_type_ids: list[list[int]]
 
 
 # # The max_tokens is being deprecated in favor of max_completion_tokens.

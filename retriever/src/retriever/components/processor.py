@@ -13,18 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import json
 import logging
-from typing import Any
+import os
+from typing import Literal
 
+from pydantic import BaseModel
 from retriever.common.chat_processor import ChatProcessorMixin
-from retriever.common.parser import parse_tensorrt_llm_args
+from retriever.common.protocol import DynamoEmbeddingRequest
 
 # from retriever.common.protocol import DynamoTRTLLMChatCompletionRequest
-from retriever.common.utils import RequestType
+from retriever.components.trt_worker import TrtWorkerEmbedding
+from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
 
-from dynamo.sdk import async_on_start, dynamo_context, dynamo_endpoint, service
+from dynamo.runtime import Client, DistributedRuntime
+from dynamo.sdk import async_on_start, depends, dynamo_context, dynamo_endpoint, service
 from dynamo.sdk.lib.config import ServiceConfig
 
 # from retriever.components.kv_router import Router
@@ -32,6 +34,13 @@ from dynamo.sdk.lib.config import ServiceConfig
 
 
 logger = logging.getLogger(__name__)
+logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+
+
+class ProcessorConfig(BaseModel):
+    model: str
+    router_mode: Literal["random", "round-robin"] = "random"
+    min_workers: int = 1
 
 
 @service(
@@ -43,7 +52,7 @@ logger = logging.getLogger(__name__)
     workers=1,
 )
 class Processor(ChatProcessorMixin):
-    # worker = depends(TensorRTLLMWorker)
+    worker = depends(TrtWorkerEmbedding)
     # router = depends(Router)
 
     def __init__(
@@ -51,81 +60,87 @@ class Processor(ChatProcessorMixin):
     ):
         class_name = self.__class__.__name__
         config = ServiceConfig.get_instance()
-        config_args = config.as_args(class_name, prefix="")
-        args, engine_config = parse_tensorrt_llm_args(config_args)
-        self.remote_prefill = args.remote_prefill
-        self.router_mode = args.router
-        self.min_workers = 1
-        self.args = args
+        processor_config = ProcessorConfig.model_validate(config.get("Processor", {}))
+        # config_args = config.as_args(class_name, prefix="")
+        # args, engine_config = parse_tensorrt_llm_args(config_args)
+        # self.remote_prefill = args.remote_prefill
+        self.router_mode = processor_config.router_mode
+        self.min_workers = processor_config.min_workers
+        # self.args = args
 
-        super().__init__(engine_config)
+        self._tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast = (
+            AutoTokenizer.from_pretrained(processor_config.model)
+        )
+        self._worker_client: Client | None = None
+        # super().__init__(engine_config)
 
     @async_on_start
     async def async_init(self):
-        runtime = dynamo_context["runtime"]
-        comp_ns, comp_name = TensorRTLLMWorker.dynamo_address()  # type: ignore
-        self.worker_client = (
+        runtime: DistributedRuntime = dynamo_context["runtime"]
+        comp_ns, comp_name = TrtWorkerEmbedding.dynamo_address()  # type: ignore
+        print("!!!!!!", comp_ns, comp_name, runtime, type(runtime))
+        self._worker_client = (
             await runtime.namespace(comp_ns)
             .component(comp_name)
             .endpoint("generate")
             .client()
         )
 
-        if self.args.router == "kv":
-            router_ns, router_name = Router.dynamo_address()  # type: ignore
-            self.router_client = (
-                await runtime.namespace(router_ns)
-                .component(router_name)
-                .endpoint("generate")
-                .client()
-            )
+        print(
+            "!!!!!!",
+            self._worker_client,
+            type(self._worker_client),
+            self._worker_client.endpoint_ids(),
+        )
 
-        while len(self.worker_client.endpoint_ids()) < self.min_workers:
-            logger.info(
-                f"Waiting for workers to be ready.\n"
-                f" Current: {len(self.worker_client.endpoint_ids())},"
-                f" Required: {self.min_workers}"
-            )
-            await asyncio.sleep(30)
+        # while len(self.worker_client.endpoint_ids()) < self.min_workers:
+        #     logger.info(
+        #         f"Waiting for workers to be ready.\n"
+        #         f" Current: {len(self.worker_client.endpoint_ids())},"
+        #         f" Required: {self.min_workers}"
+        #     )
+        #     await asyncio.sleep(30)
 
-    async def _generate(self, raw_request, request_type: RequestType):
-        raw_request.skip_special_tokens = False
-        raw_request.add_special_tokens = False
-        raw_request.spaces_between_special_tokens = False
+    async def _generate(self, raw_request: DynamoEmbeddingRequest):
+        # raw_request.skip_special_tokens = False
+        # raw_request.add_special_tokens = False
+        # raw_request.spaces_between_special_tokens = False
         logger.debug(f"[preprocessor] Received request: {raw_request}")
 
-        if request_type == RequestType.CHAT:
-            preprocessed_request = await self.chat_processor.preprocess(raw_request)
+        tokens = self._tokenizer(raw_request.input)
+
+        if self.router_mode == "random":
+            send_request = self._worker_client.random
+        elif self.router_mode == "round-robin":
+            send_request = self._worker_client.round_robin
         else:
-            preprocessed_request = await self.completions_processor.preprocess(
-                raw_request
-            )
+            raise ValueError(f"Invalid router mode: {self.router_mode}")
 
-        worker_id = ""
-        if self.router_mode == "kv":
-            router_generator = await self.router_client.generate(
-                preprocessed_request.tokens.model_dump_json()
-            )
-            decision = await router_generator.__anext__()
-            decision = decision.data()
-            worker_id, prefix_hit_rate = decision.split("_")
-            prefix_hit_rate = float(prefix_hit_rate)
-            logger.info(
-                f"Worker ID: {worker_id} with estimated prefix hit rate: {prefix_hit_rate}"
-            )
+        print(tokens)
 
-        if worker_id == "":
-            if self.router_mode == "round-robin":
-                self._send_request = self.worker_client.round_robin
-            else:
-                # fallback to random
-                self._send_request = self.worker_client.random
+        engine_generator = await send_request(tokens)
 
-            engine_generator = await self._send_request(
-                preprocessed_request.model_dump_json()
+        async for raw_response in engine_generator:
+            response = raw_response.data()
+            print("hi", response)
+            yield response
+
+        """
+                async for raw_response in engine_generator:
+            response = TRTLLMWorkerResponse.model_validate_json(raw_response.data())
+            response.outputs = [TRTLLMWorkerResponseOutput(**response.outputs[0])]
+
+            response_data = self.create_completion_stream_response(
+                request,
+                response,
             )
+            logger.debug(f"[postprocessor] Response: {response_data}")
+            yield response_data
 
-        else:
+        """
+
+        """
+                else:
             engine_generator = await self.worker_client.direct(
                 preprocessed_request.model_dump_json(), int(worker_id)
             )
@@ -144,20 +159,50 @@ class Processor(ChatProcessorMixin):
             ):
                 logger.debug(f"[preprocessor] Response: {response}")
                 yield json.loads(response)
+        """
 
-    @dynamo_endpoint(name="chat/completions")
-    async def generate_chat(self, raw_request: Any):
+        # if request_type == RequestType.CHAT:
+        #     preprocessed_request = await self.chat_processor.preprocess(raw_request)
+        # else:
+        #     preprocessed_request = await self.completions_processor.preprocess(
+        #         raw_request
+        #     )
+
+        # worker_id = ""
+        # if self.router_mode == "kv":
+        #     router_generator = await self.router_client.generate(
+        #         preprocessed_request.tokens.model_dump_json()
+        #     )
+        #     decision = await router_generator.__anext__()
+        #     decision = decision.data()
+        #     worker_id, prefix_hit_rate = decision.split("_")
+        #     prefix_hit_rate = float(prefix_hit_rate)
+        #     logger.info(
+        #         f"Worker ID: {worker_id} with estimated prefix hit rate: {prefix_hit_rate}"
+        #     )
+
+        # if worker_id == "":
+        #     if self.router_mode == "round-robin":
+        #         self._send_request = self.worker_client.round_robin
+        #     else:
+        #         # fallback to random
+        #         self._send_request = self.worker_client.random
+
+        #     engine_generator = await self._send_request(
+        #         preprocessed_request.model_dump_json()
+        #     )
+
+        # else:
+        #     engine_generator = await self.worker_client.direct(
+        #         preprocessed_request.model_dump_json(), int(worker_id)
+        #     )
+
+    @dynamo_endpoint(name="embed")
+    async def embed(self, raw_request: DynamoEmbeddingRequest):
         # max_tokens is deprecated, however if the max_tokens is provided instead
         # of max_completion_tokens, we will use the value as max_completion_tokens.
-        if raw_request.max_tokens is not None:
-            if raw_request.max_completion_tokens is None:
-                raw_request.max_completion_tokens = raw_request.max_tokens
-            else:
-                if raw_request.max_tokens != raw_request.max_completion_tokens:
-                    raise ValueError(
-                        "max_tokens and max_completion_tokens must be the same"
-                    )
-        async for response in self._generate(raw_request, RequestType.CHAT):
+        print(raw_request)
+        async for response in self._generate(raw_request):
             yield response
 
     # @dynamo_endpoint()

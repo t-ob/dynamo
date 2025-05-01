@@ -12,4 +12,4 @@ CARGO_TARGET_DIR=$HOME/dynamo/.build/target cargo build -p llmctl
 
 popd
 
-PYTHONPATH="$SCRIPT_DIR/src" dynamo serve retriever.graph:Frontend -f "$SCRIPT_DIR/src/retriever/config.yaml"
+PYTHONPATH="$SCRIPT_DIR/src" LOG_LEVEL=DEBUG dynamo serve retriever.graph:Frontend -f "$SCRIPT_DIR/src/retriever/config.yaml"

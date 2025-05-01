@@ -68,6 +68,6 @@
         "source=dynamo-precommit-cache,target=/home/ubuntu/.cache/pre-commit,type=volume",  // For pre-commit cache
 
         // Uncomment for additional functionality
-        "source=${localEnv:HF_HOME},target=/home/ubuntu/.cache/huggingface,type=bind" // Uncomment to enable HF Cache Mount. Make sure to set HF_HOME env var in you .bashrc
+        "source=${localEnv:XDG_CACHE_HOME},target=/home/ubuntu/.cache,type=bind" // Uncomment to enable HF Cache Mount. Make sure to set HF_HOME env var in you .bashrc
     ]
 }
