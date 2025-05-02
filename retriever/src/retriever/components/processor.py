@@ -136,7 +136,7 @@ class Processor(ChatProcessorMixin):
         async for raw_response in engine_generator:
             response = raw_response.data()
             embedding_data = [
-                DynamoEmbedding(index=i, object="embedding", embedding=embedding[:4])
+                DynamoEmbedding(index=i, object="embedding", embedding=embedding)
                 for i, embedding in enumerate(response["data"])
             ]
             yield DynamoEmbeddingResponse(

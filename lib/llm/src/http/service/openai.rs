@@ -258,8 +258,6 @@ async fn embeddings(
         acc
     }).await;
 
-    println!("raw: {:?}", raw);
-
     // let raw = stream.next().await.unwrap();
     // let data = raw.data.unwrap();
     // todo - tap the stream and propagate request level metrics
