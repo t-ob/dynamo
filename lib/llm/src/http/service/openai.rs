@@ -252,19 +252,24 @@ async fn embeddings(
     // capture the context to cancel the stream if the client disconnects
     let ctx = stream.context();
 
+    let raw = stream.fold(vec![], |mut acc, delta| async move {
+        let data: NvCreateEmbeddingResponse = delta.data.unwrap();
+        acc.push(data);
+        acc
+    }).await;
+
+    println!("raw: {:?}", raw);
+
+    // let raw = stream.next().await.unwrap();
+    // let data = raw.data.unwrap();
     // todo - tap the stream and propagate request level metrics
     // note - we might do this as part of the post processing set to make it more generic
-    let response = NvCreateEmbeddingResponse {
-        inner: async_openai::types::CreateEmbeddingResponse {
-            object: "list".to_string(),
-            data: vec![],
-            model: "".to_string(),
-            usage: async_openai::types::EmbeddingUsage {
-                prompt_tokens: 0,
-                total_tokens: 0,
-            },
-        },
-    };
+    if let [response] = &raw[..] {
+        inflight.mark_ok();
+        Ok(Json(response).into_response())
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to fold embeddings stream".to_string() })))
+    }
 
     // let response = NvCreateEmbeddingResponse::from_annotated_stream(stream.into())
     //     .await
@@ -280,8 +285,8 @@ async fn embeddings(
     //         ))
     //     })?;
 
-    inflight.mark_ok();
-    Ok(Json(response).into_response())
+    // inflight.mark_ok();
+    // Ok(Json(response).into_response())
 
 }
 

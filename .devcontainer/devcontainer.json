@@ -59,7 +59,8 @@
         "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
         "HF_TOKEN": "${localEnv:HF_TOKEN}",
         "CARGO_HOME": "/home/ubuntu/dynamo/.build/.cargo",
-        "RUSTUP_HOME": "/home/ubuntu/dynamo/.build/.rustup"
+        "RUSTUP_HOME": "/home/ubuntu/dynamo/.build/.rustup",
+        "NGC_API_KEY": "${localEnv:NGC_API_KEY}"
     },
     "mounts": [
         // Default mounts

@@ -1,6 +1,7 @@
 Common: &common
-  model: intfloat/e5-large-v2
-  served_model_name: intfloat/e5-large-v2
+  tokenizer: /home/ubuntu/.cache/ckpts/nv-embedqa-e5-v5_v5
+  model: /home/ubuntu/.cache/engines/nv-embedqa-e5-v5_v5/tensorrt
+  served_model_name: nvidia/nv-embedqa-e5-v5_v5
   block-size: 64
   max-model-len: 16384
 
@@ -8,13 +9,13 @@ Frontend:
   <<: *common
   endpoint: dynamo.Processor.embed
   port: 8000
-  common-configs: [model]
 
 Processor:
   <<: *common
 
-TrtWorker:
+TrtWorkerEmbedding:
   <<: *common
+  embedding_dim: 1024
 
 # VllmWorker:
 #   enforce-eager: true

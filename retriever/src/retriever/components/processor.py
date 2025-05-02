@@ -19,7 +19,12 @@ from typing import Literal
 
 from pydantic import BaseModel
 from retriever.common.chat_processor import ChatProcessorMixin
-from retriever.common.protocol import DynamoEmbeddingRequest
+from retriever.common.protocol import (
+    DynamoEmbedding,
+    DynamoEmbeddingRequest,
+    DynamoEmbeddingResponse,
+    DynamoEmbeddingUsage,
+)
 
 # from retriever.common.protocol import DynamoTRTLLMChatCompletionRequest
 from retriever.components.trt_worker import TrtWorkerEmbedding
@@ -38,7 +43,9 @@ logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
 
 
 class ProcessorConfig(BaseModel):
+    tokenizer: str
     model: str
+    served_model_name: str
     router_mode: Literal["random", "round-robin"] = "random"
     min_workers: int = 1
 
@@ -64,12 +71,13 @@ class Processor(ChatProcessorMixin):
         # config_args = config.as_args(class_name, prefix="")
         # args, engine_config = parse_tensorrt_llm_args(config_args)
         # self.remote_prefill = args.remote_prefill
+        self.config = processor_config
         self.router_mode = processor_config.router_mode
         self.min_workers = processor_config.min_workers
         # self.args = args
 
         self._tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast = (
-            AutoTokenizer.from_pretrained(processor_config.model)
+            AutoTokenizer.from_pretrained(processor_config.tokenizer)
         )
         self._worker_client: Client | None = None
         # super().__init__(engine_config)
@@ -107,7 +115,12 @@ class Processor(ChatProcessorMixin):
         # raw_request.spaces_between_special_tokens = False
         logger.debug(f"[preprocessor] Received request: {raw_request}")
 
+        # Tokenize the input texts
         tokens = self._tokenizer(raw_request.input)
+
+        # Calculate total number of tokens
+        total_tokens = sum(len(ids) for ids in tokens.input_ids)
+        logger.debug(f"Total tokens processed: {total_tokens}")
 
         if self.router_mode == "random":
             send_request = self._worker_client.random
@@ -122,8 +135,18 @@ class Processor(ChatProcessorMixin):
 
         async for raw_response in engine_generator:
             response = raw_response.data()
-            print("hi", response)
-            yield response
+            embedding_data = [
+                DynamoEmbedding(index=i, object="embedding", embedding=embedding[:4])
+                for i, embedding in enumerate(response["data"])
+            ]
+            yield DynamoEmbeddingResponse(
+                object="list",
+                model=self.config.served_model_name,
+                data=embedding_data,
+                usage=DynamoEmbeddingUsage(
+                    prompt_tokens=total_tokens, total_tokens=total_tokens
+                ),
+            )
 
         """
                 async for raw_response in engine_generator:
@@ -201,9 +224,8 @@ class Processor(ChatProcessorMixin):
     async def embed(self, raw_request: DynamoEmbeddingRequest):
         # max_tokens is deprecated, however if the max_tokens is provided instead
         # of max_completion_tokens, we will use the value as max_completion_tokens.
-        print(raw_request)
         async for response in self._generate(raw_request):
-            yield response
+            yield response.model_dump()
 
     # @dynamo_endpoint()
     # async def completions(self, raw_request):

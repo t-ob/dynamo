@@ -37,6 +37,7 @@ use dynamo_runtime::protocols::annotated::Annotated;
 use dynamo_llm::protocols::openai::{
     chat_completions::{NvCreateChatCompletionRequest, NvCreateChatCompletionStreamResponse},
     completions::{prompt_to_string, CompletionRequest, CompletionResponse},
+    embeddings::{NvCreateEmbeddingRequest, NvCreateEmbeddingResponse},
 };
 
 use dynamo_llm::engines::{EngineDispatcher, StreamingEngine};
@@ -531,5 +532,14 @@ impl AsyncEngine<SingleIn<CompletionRequest>, ManyOut<Annotated<CompletionRespon
             }
         };
         Ok(ResponseStream::new(Box::pin(output), ctx))
+    }
+}
+
+#[async_trait]
+impl AsyncEngine<SingleIn<NvCreateEmbeddingRequest>, ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error>
+    for MistralRsEngine
+{
+    async fn generate(&self, request: SingleIn<NvCreateEmbeddingRequest>) -> Result<ManyOut<Annotated<NvCreateEmbeddingResponse>>, Error> {
+        unimplemented!()
     }
 }

@@ -2,6 +2,8 @@
 
 set -e
 
+source ~/.bash_profile
+
 # Check if `entr` is installed
 if ! command -v entr &> /dev/null; then
     # Clone https://github.com/eradman/entr to temp directory
@@ -12,6 +14,20 @@ if ! command -v entr &> /dev/null; then
     ./configure
     make test
     sudo make install
+fi
+
+# Check if `ngc` is installed
+if ! command -v ngc &> /dev/null; then
+    echo "ngc could not be found, installing..."
+
+    pushd $HOME
+
+    wget --content-disposition https://api.ngc.nvidia.com/v2/resources/nvidia/ngc-apps/ngc_cli/versions/3.64.3/files/ngccli_linux.zip -O ngccli_linux.zip && unzip ngccli_linux.zip
+    chmod u+x ngc-cli/ngc
+    echo "export PATH=\"\$PATH:$(pwd)/ngc-cli\"" >> ~/.bash_profile && source ~/.bash_profile
+    rm ngccli_linux.zip
+
+    popd
 fi
 
 # Catch Ctrl-C and exit

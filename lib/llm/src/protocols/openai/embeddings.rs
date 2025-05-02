@@ -51,7 +51,7 @@ impl NvCreateEmbeddingResponse {
     pub fn empty() -> Self {
         Self {
             inner: async_openai::types::CreateEmbeddingResponse {
-                object: "embedding".to_string(),
+                object: "list".to_string(),
                 model: "embedding".to_string(),
                 data: vec![],
                 usage: async_openai::types::EmbeddingUsage {

@@ -43,6 +43,24 @@ class DynamoEmbeddingRequest(BaseModel):
         return v
 
 
+class DynamoEmbeddingUsage(BaseModel):
+    prompt_tokens: int
+    total_tokens: int
+
+
+class DynamoEmbedding(BaseModel):
+    index: int
+    object: str
+    embedding: list[float]
+
+
+class DynamoEmbeddingResponse(BaseModel):
+    object: str
+    model: str
+    data: list[DynamoEmbedding]
+    usage: DynamoEmbeddingUsage
+
+
 class TrtWorkerEmbeddingRequest(BaseModel):
     input_ids: list[list[int]]
     attention_mask: list[list[int]]
