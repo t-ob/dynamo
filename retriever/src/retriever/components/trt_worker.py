@@ -1,3 +1,4 @@
+import bisect
 import ctypes
 import logging
 
@@ -169,7 +170,8 @@ class TrtWorkerEmbedding:
         #     router=args.router,
         #     server_type=ServerType.GEN,
         # )
-        self.foo = []
+        self.profile_shapes = []
+        self.profiles = []
 
     @async_on_start
     async def async_init(self):
@@ -218,44 +220,14 @@ class TrtWorkerEmbedding:
         logger.info(self.engine.num_optimization_profiles)
 
         for i in range(self.engine.num_optimization_profiles):
+            profile_shapes = []
             for input_name in self.input_tensor_names:
-                logger.info(
-                    f"Input {input_name} Optimization profile {i}: {self.engine.get_tensor_profile_shape(input_name, i)[-1]}"
+                profile_shapes.append(
+                    tuple(self.engine.get_tensor_profile_shape(input_name, i)[-1])
                 )
-            self.foo.append(self.allocate_buffers(profile_idx=i))
+            self.profile_shapes.append(profile_shapes)
+            self.profiles.append(self.allocate_buffers(profile_idx=i))
 
-        pass
-        # self._init_engine()
-
-        # if self._remote_prefill:
-        #     runtime = dynamo_context["runtime"]
-        #     comp_ns, comp_name = TensorRTLLMPrefillWorker.dynamo_address()  # type: ignore
-        #     self._prefill_client = (
-        #         await runtime.namespace(comp_ns)
-        #         .component(comp_name)
-        #         .endpoint("generate")
-        #         .client()
-        #     )
-        #     while len(self._prefill_client.endpoint_ids()) < self._min_prefill_workers:
-        #         logger.info(
-        #             f"Waiting for prefill workers to be ready.\n"
-        #             f" Current: {len(self._prefill_client.endpoint_ids())},"
-        #             f" Required: {self._min_prefill_workers}"
-        #         )
-        #         await asyncio.sleep(30)
-
-        # if self._kv_metrics_publisher is not None:
-        #     task = asyncio.create_task(self.create_metrics_publisher_endpoint())
-        #     task.add_done_callback(
-        #         lambda _: logger.info("metrics publisher endpoint created")
-        #     )
-
-    # async def create_metrics_publisher_endpoint(self):
-    #     component = dynamo_context["component"]
-    #     await self._kv_metrics_publisher.create_endpoint(component)
-
-    # Allocates all buffers required for an engine, i.e. host/device inputs/outputs.
-    # If engine uses dynamic shapes, specify a profile to find the maximum input & output size.
     def allocate_buffers(self, profile_idx: int | None = None):
         input_shapes = []
         output_shapes = []
@@ -266,20 +238,6 @@ class TrtWorkerEmbedding:
         outputs = []
         bindings = []
         stream = cuda_call(cudart.cudaStreamCreate())
-        # tensor_names = [
-        #     self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)
-        # ]
-
-        # input_tensor_names = [
-        #     tensor_name
-        #     for tensor_name in tensor_names
-        #     if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.INPUT
-        # ]
-        # output_tensor_names = [
-        #     tensor_name
-        #     for tensor_name in tensor_names
-        #     if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.OUTPUT
-        # ]
 
         def _shape(binding):
             shape = (
@@ -351,6 +309,9 @@ class TrtWorkerEmbedding:
             )
 
         # Prepare input data from list[list[int]] to np.ndarray
+        profile_idx = bisect.bisect_left(
+            self.profile_shapes, input_ids_data.shape, key=lambda x: x[0]
+        )
 
         (
             inputs,
@@ -359,16 +320,16 @@ class TrtWorkerEmbedding:
             output_shapes,
             bindings,
             stream,
-        ) = self.allocate_buffers(profile_idx=1)
+        ) = self.profiles[
+            profile_idx
+        ]  # self.allocate_buffers(profile_idx=1)
 
         inputs[0].host = input_ids_data
         inputs[1].host = attention_mask_data
         inputs[2].host = token_type_ids_data
 
-        print(len(inputs), len(outputs), len(bindings), stream)
-
         context = self.engine.create_execution_context()
-        context.set_optimization_profile_async(1, stream)
+        context.set_optimization_profile_async(profile_idx, stream)
 
         context.set_input_shape(self.engine.get_tensor_name(0), input_ids_data.shape)
         context.set_input_shape(

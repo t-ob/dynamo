@@ -31,7 +31,7 @@ if ! command -v ngc &> /dev/null; then
 fi
 
 # Check if `cuda-python[all]` is installed
-if ! python -c "import cuda_python" &> /dev/null; then
+if ! python -c "import cuda" &> /dev/null; then
     echo "cuda-python could not be found, installing..."
     python3 -m pip install cuda-python[all]
 fi

@@ -8,5 +8,15 @@ curl http://localhost:8000/v1/embeddings \
 
 ###
 
+curl http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "nvidia/nv-embedqa-llama32-1b-v2",
+    "input": ["Hello, world!", "Second input", "Third input", "Fourth input", "Fifth input", "Sixth input", "Seventh input", "Eighth input", "Ninth input", "Tenth input", "Eleventh input", "Twelfth input", "Thirteenth input", "Fourteenth input", "Fifteenth input", "Sixteenth input", "Seventeenth input", "Eighteenth input", "Nineteenth input", "Twentieth input"]
+  }'
+
+
+###
+
 
 curl http://localhost:8000/v1/models
