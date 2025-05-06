@@ -150,6 +150,9 @@ class TrtWorkerEmbedding:
             config.get(self.__class__.__name__, {})
         )
         self._config = trt_worker_config
+        self.engine: trt.ICudaEngine | None = None
+        self.input_tensor_names: list[str] | None = None
+        self.output_tensor_names: list[str] | None = None
         # config_args = config.as_args(class_name, prefix="")
         # args, engine_config = parse_tensorrt_llm_args(config_args)
         # worker_id = dynamo_context["endpoints"][0].lease_id()
@@ -166,6 +169,7 @@ class TrtWorkerEmbedding:
         #     router=args.router,
         #     server_type=ServerType.GEN,
         # )
+        self.foo = []
 
     @async_on_start
     async def async_init(self):
@@ -182,17 +186,44 @@ class TrtWorkerEmbedding:
             engine_bytes = f.read()
 
         # Deserialize the engine
-        self.engine = runtime.deserialize_cuda_engine(engine_bytes)
+        self.engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(engine_bytes)
+        print("engine type", type(self.engine))
 
         if not self.engine:
             raise RuntimeError(
                 f"Failed to load TensorRT engine from {self._config.model}"
             )
 
+        tensor_names = [
+            self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)
+        ]
+        input_tensor_names = [
+            tensor_name
+            for tensor_name in tensor_names
+            if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.INPUT
+        ]
+        output_tensor_names = [
+            tensor_name
+            for tensor_name in tensor_names
+            if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.OUTPUT
+        ]
+
+        self.input_tensor_names = input_tensor_names
+        self.output_tensor_names = output_tensor_names
+
         # Create execution context
-        self.context = self.engine.create_execution_context()
+        # self.context = self.engine.create_execution_context()
 
         logger.info("TensorRT engine loaded successfully")
+        logger.info(self.engine.num_optimization_profiles)
+
+        for i in range(self.engine.num_optimization_profiles):
+            for input_name in self.input_tensor_names:
+                logger.info(
+                    f"Input {input_name} Optimization profile {i}: {self.engine.get_tensor_profile_shape(input_name, i)[-1]}"
+                )
+            self.foo.append(self.allocate_buffers(profile_idx=i))
+
         pass
         # self._init_engine()
 
@@ -235,21 +266,20 @@ class TrtWorkerEmbedding:
         outputs = []
         bindings = []
         stream = cuda_call(cudart.cudaStreamCreate())
-        tensor_names = [
-            self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)
-        ]
-        print("hihi", tensor_names)
+        # tensor_names = [
+        #     self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)
+        # ]
 
-        input_tensor_names = [
-            tensor_name
-            for tensor_name in tensor_names
-            if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.INPUT
-        ]
-        output_tensor_names = [
-            tensor_name
-            for tensor_name in tensor_names
-            if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.OUTPUT
-        ]
+        # input_tensor_names = [
+        #     tensor_name
+        #     for tensor_name in tensor_names
+        #     if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.INPUT
+        # ]
+        # output_tensor_names = [
+        #     tensor_name
+        #     for tensor_name in tensor_names
+        #     if self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.OUTPUT
+        # ]
 
         def _shape(binding):
             shape = (
@@ -265,40 +295,20 @@ class TrtWorkerEmbedding:
                 )
             return shape
 
-        for binding in input_tensor_names:
-            # get_tensor_profile_shape returns (min_shape, optimal_shape, max_shape)
-            # Pick out the max shape to allocate enough memory for the binding.
+        for binding in self.input_tensor_names:
             shape = _shape(binding)
             trt_type = self.engine.get_tensor_dtype(binding)
             input_shapes.append(shape)
             input_dtypes.append(np.dtype(trt.nptype(trt_type)))
-            # print("debug", binding, shape, trt_type, self.engine.get_tensor_profile_shape(binding, profile_idx))
 
-            # # Allocate host and device buffers
-            # if trt.nptype(trt_type):
-            #     dtype = np.dtype(trt.nptype(trt_type))
-            #     bindingMemory = HostDeviceMem(size, dtype)
-            # else: # no numpy support: create a byte array instead (BF16, FP8, INT4)
-            #     size = int(size * trt_type.itemsize)
-            #     bindingMemory = HostDeviceMem(size)
-
-            # # Append the device buffer to device bindings.
-            # bindings.append(int(bindingMemory.device))
-
-            # # Append to the appropriate list.
-            # if self.engine.get_tensor_mode(binding) == trt.TensorIOMode.INPUT:
-            #     inputs.append(bindingMemory)
-            # else:
-            #     outputs.append(bindingMemory)
-
-        for binding in output_tensor_names:
+        for binding in self.output_tensor_names:
             shape = tuple(input_shapes[0][:-1] + (self._config.embedding_dim,))
             trt_type = self.engine.get_tensor_dtype(binding)
             output_shapes.append(shape)
             output_dtypes.append(np.dtype(trt.nptype(trt_type)))
 
         for binding, shape, dtype in zip(
-            input_tensor_names, input_shapes, input_dtypes
+            self.input_tensor_names, input_shapes, input_dtypes
         ):
             size = trt.volume(shape)
             bindingMemory = HostDeviceMem(size, dtype)
@@ -306,7 +316,7 @@ class TrtWorkerEmbedding:
             bindings.append(int(bindingMemory.device))
 
         for binding, shape, dtype in zip(
-            output_tensor_names, output_shapes, output_dtypes
+            self.output_tensor_names, output_shapes, output_dtypes
         ):
             size = trt.volume(shape)
             bindingMemory = HostDeviceMem(size, dtype)
@@ -317,6 +327,9 @@ class TrtWorkerEmbedding:
 
     @dynamo_endpoint()
     async def generate(self, request: TrtWorkerEmbeddingRequest):
+        if self.engine is None:
+            raise RuntimeError("Engine not initialized")
+
         # Create input and output buffers
         input_ids = request.input_ids
         attention_mask = request.attention_mask
@@ -364,9 +377,6 @@ class TrtWorkerEmbedding:
         context.set_input_shape(
             self.engine.get_tensor_name(2), token_type_ids_data.shape
         )
-        # self.context.set_binding_shape(3, (len(input_ids), 512))
-
-        # self.context.set_output_shape(self.engine.get_tensor_name(3), (len(input_ids), 512))
 
         [output] = do_inference(context, self.engine, bindings, inputs, outputs, stream)
         [output_shape] = output_shapes
