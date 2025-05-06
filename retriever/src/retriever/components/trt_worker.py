@@ -129,6 +129,7 @@ logger = logging.getLogger(__name__)
 class TrtWorkerEmbeddingConfig(BaseModel):
     model: str
     tokenizer: str
+    tokenizer_max_seq_len: int
     embedding_dim: int
 
 
@@ -293,9 +294,15 @@ class TrtWorkerEmbedding:
         attention_mask = request.attention_mask
         token_type_ids = request.token_type_ids
 
-        input_ids_data = np.zeros((len(input_ids), 512), dtype=np.int32)
-        attention_mask_data = np.zeros((len(attention_mask), 512), dtype=np.int32)
-        token_type_ids_data = np.zeros((len(token_type_ids), 512), dtype=np.int32)
+        input_ids_data = np.zeros(
+            (len(input_ids), self._config.tokenizer_max_seq_len), dtype=np.int32
+        )
+        attention_mask_data = np.zeros(
+            (len(attention_mask), self._config.tokenizer_max_seq_len), dtype=np.int32
+        )
+        token_type_ids_data = np.zeros(
+            (len(token_type_ids), self._config.tokenizer_max_seq_len), dtype=np.int32
+        )
 
         for idx, (input_id, attention_mask, token_type_id) in enumerate(
             zip(input_ids, attention_mask, token_type_ids)
@@ -308,7 +315,6 @@ class TrtWorkerEmbedding:
                 token_type_id, dtype=np.int32
             )
 
-        # Prepare input data from list[list[int]] to np.ndarray
         profile_idx = bisect.bisect_left(
             self.profile_shapes, input_ids_data.shape, key=lambda x: x[0]
         )
@@ -346,11 +352,5 @@ class TrtWorkerEmbedding:
 
         # Convert numpy array to list of lists for JSON serialization
         output_as_lists = output.tolist()
-        print(
-            "Converted output shape:",
-            len(output_as_lists),
-            "x",
-            len(output_as_lists[0]) if output_as_lists else 0,
-        )
 
         yield {"data": output_as_lists}

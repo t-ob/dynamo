@@ -56,7 +56,7 @@ class ProcessorConfig(BaseModel):
         "namespace": "dynamo",
     },
     resources={"cpu": "10", "memory": "20Gi"},
-    workers=1,
+    workers=2,
 )
 class Processor(ChatProcessorMixin):
     worker = depends(TrtWorkerEmbedding)

@@ -1,5 +1,6 @@
 Common: &common
   tokenizer: /home/ubuntu/.cache/ckpts/nv-embedqa-e5-v5_v5
+  tokenizer_max_seq_len: 512
   model: /home/ubuntu/.cache/engines/nv-embedqa-e5-v5_v5/tensorrt
   served_model_name: nvidia/nv-embedqa-e5-v5
   block-size: 64
