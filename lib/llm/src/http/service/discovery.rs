@@ -337,6 +337,17 @@ async fn handle_put(model_entry: &ModelEntry, state: Arc<ModelWatchState>) -> an
                 .add_completions_model(&model_entry.name, engine)?;
         }
         ModelType::Embedding => {
+            let frontend = SegmentSource::<
+                SingleIn<NvCreateEmbeddingRequest>,
+                ManyOut<Annotated<NvCreateEmbeddingResponse>>,
+            >::new();
+            let preprocessor = OpenAIPreprocessor::new(card.clone()).await?.into_operator();
+            let backend = Backend::from_mdc(card.clone()).await?.into_operator();
+            let router = PushRouter::<BackendInput, Annotated<LLMEngineOutput>>::from_client(
+                client.clone(),
+                RouterMode::Random, // TODO how do we configure this?
+            )
+            .await?;
             let client = state
                 .drt
                 .namespace(model_entry.endpoint.namespace)?

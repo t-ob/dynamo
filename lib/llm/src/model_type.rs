@@ -33,19 +33,12 @@ impl ModelType {
         match self {
             Self::Chat => "chat",
             Self::Completion => "completion",
-<<<<<<< HEAD
-            Self::Backend => "backend",
-=======
             Self::Embedding => "embedding",
->>>>>>> 14bf7f0 (wip)
+            Self::Backend => "backend",
         }
     }
 
     pub fn all() -> Vec<Self> {
-<<<<<<< HEAD
-        vec![Self::Chat, Self::Completion, Self::Backend]
-=======
-        vec![Self::Chat, Self::Completion, Self::Embedding]
->>>>>>> 14bf7f0 (wip)
+        vec![Self::Chat, Self::Completion, Self::Embedding, Self::Backend]
     }
 }
