@@ -56,7 +56,7 @@ class ProcessorConfig(BaseModel):
         "namespace": "dynamo",
     },
     resources={"cpu": "10", "memory": "20Gi"},
-    workers=2,
+    workers=10,
 )
 class Processor(ChatProcessorMixin):
     worker = depends(TrtWorkerEmbedding)
@@ -86,28 +86,12 @@ class Processor(ChatProcessorMixin):
     async def async_init(self):
         runtime: DistributedRuntime = dynamo_context["runtime"]
         comp_ns, comp_name = TrtWorkerEmbedding.dynamo_address()  # type: ignore
-        print("!!!!!!", comp_ns, comp_name, runtime, type(runtime))
         self._worker_client = (
             await runtime.namespace(comp_ns)
             .component(comp_name)
             .endpoint("generate")
             .client()
         )
-
-        print(
-            "!!!!!!",
-            self._worker_client,
-            type(self._worker_client),
-            self._worker_client.endpoint_ids(),
-        )
-
-        # while len(self.worker_client.endpoint_ids()) < self.min_workers:
-        #     logger.info(
-        #         f"Waiting for workers to be ready.\n"
-        #         f" Current: {len(self.worker_client.endpoint_ids())},"
-        #         f" Required: {self.min_workers}"
-        #     )
-        #     await asyncio.sleep(30)
 
     async def _generate(self, raw_request: DynamoEmbeddingRequest):
         # raw_request.skip_special_tokens = False

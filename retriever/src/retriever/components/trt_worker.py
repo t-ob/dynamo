@@ -229,6 +229,8 @@ class TrtWorkerEmbedding:
             self.profile_shapes.append(profile_shapes)
             self.profiles.append(self.allocate_buffers(profile_idx=i))
 
+        # etcd call to register model is live (possibly automatic)
+
     def allocate_buffers(self, profile_idx: int | None = None):
         input_shapes = []
         output_shapes = []
