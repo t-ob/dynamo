@@ -291,8 +291,9 @@ impl OpenAIPreprocessor {
 
         // Tokenize all input texts (keep separate for each input)
         let mut all_token_ids = Vec::new();
-        for text in &input_texts {
-            let encoding = tokio::task::block_in_place(|| self.tokenizer.encode(text))?;
+        let input_strs: Vec<&str> = input_texts.iter().map(|s| s.as_str()).collect();
+        let encodings = tokio::task::block_in_place(|| self.tokenizer.encode_batch(&input_strs))?;
+        for encoding in encodings {
             all_token_ids.push(encoding.token_ids);
         }
 
