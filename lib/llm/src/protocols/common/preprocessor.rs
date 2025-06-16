@@ -76,9 +76,6 @@ pub struct PreprocessedEmbeddingRequest {
     /// Tokenized input text as token IDs (one Vec per input text)
     pub token_ids: Vec<Vec<TokenIdType>>,
 
-    /// Original text inputs for reference/debugging
-    pub input_texts: Vec<String>,
-
     /// Model to use for embedding
     pub model: String,
 

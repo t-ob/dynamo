@@ -27,6 +27,7 @@ pub mod prompt;
 pub mod tools;
 
 use anyhow::Result;
+use async_openai::types::EncodingFormat;
 use futures::stream::{self, StreamExt};
 use prompt::OAIPromptFormatter;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -269,7 +270,12 @@ impl OpenAIPreprocessor {
         Ok((builder.build()?, annotations))
     }
 
-    /// Preprocess an embedding request, tokenizing input text to token IDs
+    /// Preprocess an embedding request, handling both text and token ID inputs.
+    ///
+    /// For text inputs, tokenizes the text using the configured tokenizer.
+    /// For token ID inputs, uses the provided token IDs directly and skips tokenization.
+    ///
+    /// Returns both the preprocessed request and a hashmap of annotations.
     pub fn preprocess_embedding_request(
         &self,
         request: &NvCreateEmbeddingRequest,
@@ -277,25 +283,26 @@ impl OpenAIPreprocessor {
         let mut annotations = HashMap::new();
         let mut builder = PreprocessedEmbeddingRequest::builder();
 
-        // Extract input texts - handle both string and array formats
-        let input_texts: Vec<String> = match &request.inner.input {
-            async_openai::types::EmbeddingInput::String(s) => vec![s.clone()],
-            async_openai::types::EmbeddingInput::StringArray(arr) => arr.clone(),
-            async_openai::types::EmbeddingInput::IntegerArray(_) => {
-                anyhow::bail!("Token ID arrays not supported - expecting text input");
+        let all_token_ids = match &request.inner.input {
+            async_openai::types::EmbeddingInput::String(s) => {
+                let encoding = tokio::task::block_in_place(|| self.tokenizer.encode(s))?;
+                vec![encoding.token_ids]
             }
-            async_openai::types::EmbeddingInput::ArrayOfIntegerArray(_) => {
-                anyhow::bail!("Token ID arrays not supported - expecting text input");
+            async_openai::types::EmbeddingInput::StringArray(arr) => {
+                let input_strs: Vec<&str> = arr.iter().map(|s| s.as_str()).collect();
+                let encodings =
+                    tokio::task::block_in_place(|| self.tokenizer.encode_batch(&input_strs))?;
+                let token_arrays: Vec<Vec<u32>> = encodings
+                    .into_iter()
+                    .map(|encoding| encoding.token_ids)
+                    .collect();
+                token_arrays
+            }
+            async_openai::types::EmbeddingInput::IntegerArray(token_ids) => vec![token_ids.clone()],
+            async_openai::types::EmbeddingInput::ArrayOfIntegerArray(token_arrays) => {
+                token_arrays.clone()
             }
         };
-
-        // Tokenize all input texts (keep separate for each input)
-        let mut all_token_ids = Vec::new();
-        let input_strs: Vec<&str> = input_texts.iter().map(|s| s.as_str()).collect();
-        let encodings = tokio::task::block_in_place(|| self.tokenizer.encode_batch(&input_strs))?;
-        for encoding in encodings {
-            all_token_ids.push(encoding.token_ids);
-        }
 
         // Handle annotations
         if request.has_annotation(ANNOTATION_TOKEN_IDS) {
@@ -306,15 +313,11 @@ impl OpenAIPreprocessor {
         }
 
         builder.token_ids(all_token_ids);
-        builder.input_texts(input_texts);
         builder.model(request.inner.model.clone());
-        builder.encoding_format(
-            request
-                .inner
-                .encoding_format
-                .clone()
-                .map(|f| format!("{:?}", f)),
-        );
+        builder.encoding_format(request.inner.encoding_format.as_ref().map(|f| match f {
+            EncodingFormat::Float => "float".to_string(),
+            EncodingFormat::Base64 => "base64".to_string(),
+        }));
         builder.dimensions(request.inner.dimensions);
 
         builder.annotations(request.annotations().unwrap_or_default());
