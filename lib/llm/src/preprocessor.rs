@@ -276,7 +276,7 @@ impl OpenAIPreprocessor {
     /// For token ID inputs, uses the provided token IDs directly and skips tokenization.
     ///
     /// Returns both the preprocessed request and a hashmap of annotations.
-    pub fn preprocess_embedding_request(
+    pub async fn preprocess_embedding_request(
         &self,
         request: &NvCreateEmbeddingRequest,
     ) -> Result<(PreprocessedEmbeddingRequest, HashMap<String, String>)> {
@@ -289,9 +289,15 @@ impl OpenAIPreprocessor {
                 vec![encoding.token_ids]
             }
             async_openai::types::EmbeddingInput::StringArray(arr) => {
-                let input_strs: Vec<&str> = arr.iter().map(|s| s.as_str()).collect();
-                let encodings =
-                    tokio::task::block_in_place(|| self.tokenizer.encode_batch(&input_strs))?;
+                let input_strs: Vec<String> = arr.to_vec();
+                let encodings = tokio::task::spawn_blocking({
+                    let tokenizer = self.tokenizer.clone();
+                    let strs = input_strs.clone();
+                    move || {
+                        tokenizer.encode_batch(&strs.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+                    }
+                })
+                .await??;
                 let token_arrays: Vec<Vec<u32>> = encodings
                     .into_iter()
                     .map(|encoding| encoding.token_ids)
@@ -614,7 +620,8 @@ impl
         let (request, context) = request.into_parts();
 
         // Preprocess the embedding request
-        let (preprocessed_request, annotations) = self.preprocess_embedding_request(&request)?;
+        let (preprocessed_request, annotations) =
+            self.preprocess_embedding_request(&request).await?;
 
         // Forward to next stage
         let preprocessed_request = context.map(|_| preprocessed_request);
