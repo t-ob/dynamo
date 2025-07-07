@@ -153,7 +153,7 @@ impl OpenAIPreprocessor {
     /// Annotations evaluated by this method include:
     /// - `formatted_prompt`
     /// - `token_ids`
-    pub fn preprocess_request<
+    pub async fn preprocess_request<
         R: OAIChatLikeRequest
             + AnnotationsProvider
             + SamplingOptionsProvider
@@ -205,9 +205,12 @@ impl OpenAIPreprocessor {
                                 self.formatter.render(request)?
                             };
 
-                            let encoding = tokio::task::block_in_place(|| {
-                                self.tokenizer.encode(&formatted_prompt)
-                            })?;
+                            let encoding = tokio::task::spawn_blocking({
+                                let tokenizer = self.tokenizer.clone();
+                                let formatted_prompt = formatted_prompt.clone();
+                                move || tokenizer.encode(&formatted_prompt)
+                            })
+                            .await??;
 
                             if request.has_annotation(ANNOTATION_FORMATTED_PROMPT) {
                                 annotations.insert(
@@ -226,15 +229,21 @@ impl OpenAIPreprocessor {
                             builder.token_ids(encoding.token_ids);
                         }
                         TextInput::Batch(texts) => {
-                            let token_batches: Result<Vec<Vec<u32>>, _> = texts
-                                .par_iter()
-                                .map(|text| {
-                                    tokio::task::block_in_place(|| self.tokenizer.encode(text))
-                                        .map(|encoding| encoding.token_ids)
-                                })
+                            let encodings = tokio::task::spawn_blocking({
+                                let tokenizer = self.tokenizer.clone();
+                                let strs = texts.clone();
+                                move || {
+                                    tokenizer.encode_batch(
+                                        &strs.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                                    )
+                                }
+                            })
+                            .await??;
+                            let token_batches: Vec<Vec<u32>> = encodings
+                                .into_iter()
+                                .map(|encoding| encoding.token_ids)
                                 .collect();
 
-                            let token_batches = token_batches?;
                             builder.batch_token_ids(Some(token_batches));
                             builder.token_ids(vec![]);
                         }
@@ -285,7 +294,12 @@ impl OpenAIPreprocessor {
 
         let all_token_ids = match &request.inner.input {
             async_openai::types::EmbeddingInput::String(s) => {
-                let encoding = tokio::task::block_in_place(|| self.tokenizer.encode(s))?;
+                let encoding = tokio::task::spawn_blocking({
+                    let tokenizer = self.tokenizer.clone();
+                    let s = s.clone();
+                    move || tokenizer.encode(&s)
+                })
+                .await??;
                 vec![encoding.token_ids]
             }
             async_openai::types::EmbeddingInput::StringArray(arr) => {
@@ -509,7 +523,7 @@ impl
         let mut response_generator = Box::new(response_generator);
 
         // convert the chat completion request to a common completion request
-        let (common_request, annotations) = self.preprocess_request(&request)?;
+        let (common_request, annotations) = self.preprocess_request(&request).await?;
 
         // update isl
         response_generator.update_isl(common_request.token_ids.len() as u32);
@@ -566,7 +580,7 @@ impl
         let response_generator = request.response_generator();
         let mut response_generator = Box::new(response_generator);
         // convert the chat completion request to a common completion request
-        let (common_request, annotations) = self.preprocess_request(&request)?;
+        let (common_request, annotations) = self.preprocess_request(&request).await?;
 
         // update isl
         response_generator.update_isl(common_request.token_ids.len() as u32);
