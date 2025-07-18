@@ -1,0 +1,8 @@
+uv pip install torch==2.6.0 "sglang[all]>=0.4.6.post5" --find-links https://flashinfer.ai/whl/cu124/torch2.6/flashinfer-python/
+python3 -m pip install tensorrt==10.9.0.34
+python3 -m pip install cuda-python[all]
+
+RUST_BACKTRACE=1 DYN_LOG=debug dynamo run in=http out=sglang --model-path=Alibaba-NLP/gte-Qwen2-1.5B-instruct --extra-engine-args ./extra_args.json
+
+RUST_BACKTRACE=1 DYN_LOG=debug dynamo run in=http out=dyn --model-path=Alibaba-NLP/gte-Qwen2-1.5B-instruct
+python nim.py
